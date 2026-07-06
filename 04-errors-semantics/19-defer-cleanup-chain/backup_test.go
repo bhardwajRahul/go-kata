@@ -432,6 +432,54 @@ func TestBackupDatabase_SelfCorrection_NoFDLeak_1000Runs(t *testing.T) {
 	assert.LessOrEqual(t, after, before+3, "open file descriptors should not grow after 1000 runs")
 }
 
+func TestBackupDatabase_PublicWrapper_Success(t *testing.T) {
+	dir := t.TempDir()
+	filename := filepath.Join(dir, "backup.csv")
+
+	oldConnector := defaultConnector
+	t.Cleanup(func() {
+		defaultConnector = oldConnector
+	})
+
+	tx := &fakeTx{}
+	rows := &fakeRows{data: []fakeRow{{id: 7, payload: "public"}}}
+	db := &fakeDB{tx: tx, rows: rows}
+
+	defaultConnector = func(context.Context, string) (DB, error) {
+		return db, nil
+	}
+
+	err := BackupDatabase(context.Background(), "db://public", filename)
+	require.NoError(t, err)
+	assert.Equal(t, 1, tx.commitCalled)
+	assert.Equal(t, 0, tx.rollbackCalled)
+	assert.Equal(t, 1, db.closeCalled)
+	assert.True(t, rows.closed)
+
+	got, readErr := os.ReadFile(filename)
+	require.NoError(t, readErr)
+	assert.Equal(t, "7,public\n", string(got))
+}
+
+func TestBackupDatabase_PublicWrapper_ConnectorError(t *testing.T) {
+	errConnect := errors.New("public connector fail")
+
+	oldConnector := defaultConnector
+	t.Cleanup(func() {
+		defaultConnector = oldConnector
+	})
+
+	defaultConnector = func(context.Context, string) (DB, error) {
+		return nil, errConnect
+	}
+
+	filename := filepath.Join(t.TempDir(), "backup.csv")
+	err := BackupDatabase(context.Background(), "db://public", filename)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "connect DB")
+	assert.ErrorIs(t, err, errConnect)
+}
+
 func countOpenFDs() (int, error) {
 	var lastErr error
 
