@@ -272,6 +272,17 @@ func TestBackupDatabase_Matrix(t *testing.T) {
 			wantDBCloseCalls:  0,
 			wantRowsClosed:    false,
 		},
+		{
+			name:              "rows close failure is preserved",
+			rows:              []fakeRow{{id: 1, payload: "ok"}},
+			rowsCloseErr:      errors.New("rows close boom"),
+			wantErr:           true,
+			wantErrContains:   []string{"close rows"},
+			wantCommitCalls:   1,
+			wantRollbackCalls: 0,
+			wantDBCloseCalls:  1,
+			wantRowsClosed:    true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -478,6 +489,21 @@ func TestBackupDatabase_PublicWrapper_ConnectorError(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "connect DB")
 	assert.ErrorIs(t, err, errConnect)
+}
+
+func TestBackupDatabase_PublicWrapper_DefaultConnectorUnconfigured(t *testing.T) {
+	oldConnector := defaultConnector
+	t.Cleanup(func() {
+		defaultConnector = oldConnector
+	})
+
+	defaultConnector = oldConnector
+
+	filename := filepath.Join(t.TempDir(), "backup.csv")
+	err := BackupDatabase(context.Background(), "db://public", filename)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "connect DB")
+	assert.ErrorContains(t, err, "no database connector configured")
 }
 
 func countOpenFDs() (int, error) {
