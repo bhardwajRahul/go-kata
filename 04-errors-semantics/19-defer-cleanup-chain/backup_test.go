@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -432,9 +433,41 @@ func TestBackupDatabase_SelfCorrection_NoFDLeak_1000Runs(t *testing.T) {
 }
 
 func countOpenFDs() (int, error) {
-	entries, err := os.ReadDir("/dev/fd")
+	var lastErr error
+
+	for _, path := range []string{"/proc/self/fd", "/dev/fd"} {
+		count, err := countNumericDirEntries(path)
+		if err == nil {
+			return count, nil
+		}
+		lastErr = err
+	}
+
+	if lastErr == nil {
+		lastErr = errors.New("no fd directory available")
+	}
+
+	return 0, lastErr
+}
+
+func countNumericDirEntries(path string) (int, error) {
+	dir, err := os.Open(path)
 	if err != nil {
 		return 0, err
 	}
-	return len(entries), nil
+	defer dir.Close()
+
+	names, err := dir.Readdirnames(-1)
+	if err != nil {
+		return 0, err
+	}
+
+	count := 0
+	for _, name := range names {
+		if _, convErr := strconv.Atoi(name); convErr == nil {
+			count++
+		}
+	}
+
+	return count, nil
 }
